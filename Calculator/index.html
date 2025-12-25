@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>React Calculator</title>
+  <style>
+    /* Simple modern styles */
+    :root{
+      /* Changed background color here */
+      --bg: #083958; /* deep teal-blue */
+      --panel: rgba(255,255,255,0.03);
+      --accent:#34d399;
+      --muted:#9aa4b2;
+      --text:#eef2f7;
+      --radius:14px;
+    }
+    html,body,#root{height:100%}
+    body{
+      margin:0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      /* adjusted radial gradients to match new background */
+      background: radial-gradient(1200px 600px at 10% 10%, rgba(2,56,78,0.55) 0%, transparent 15%), radial-gradient(900px 400px at 90% 90%, rgba(52,211,153,0.04) 0%, transparent 15%), var(--bg);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:32px;
+      color:var(--text);
+    }
+    .calculator{
+      width:420px;
+      max-width:96vw;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-radius: var(--radius);
+      padding:18px;
+      box-shadow: 0 14px 40px rgba(2,6,23,0.6);
+      border:1px solid rgba(255,255,255,0.03);
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+    .header{display:flex;justify-content:space-between;align-items:center}
+    .title{margin:0;font-size:1rem}
+    .display{
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-radius:12px;
+      padding:14px;
+      min-height:96px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      align-items:flex-end;
+      gap:6px;
+      border:1px solid rgba(255,255,255,0.03);
+      overflow:hidden;
+    }
+    .expr{font-size:0.95rem;color:var(--muted);width:100%;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:4px}
+    .value{font-weight:700;font-size:2.3rem;width:100%;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .keys{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+    .btn{
+      background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));
+      color:var(--text);
+      border: 1px solid rgba(255,255,255,0.03);
+      padding:16px;
+      font-size:1.03rem;
+      border-radius:10px;
+      cursor:pointer;
+      transition: transform .12s, box-shadow .12s;
+      box-shadow: 0 8px 20px rgba(2,6,23,0.32), inset 0 -4px 8px rgba(0,0,0,0.12);
+      user-select:none;
+      display:flex;align-items:center;justify-content:center;
+    }
+    .btn:active{transform:translateY(3px);box-shadow:0 4px 10px rgba(2,6,23,0.32)}
+    .btn.operator{background:linear-gradient(180deg, rgba(52,211,153,0.10), rgba(16,185,129,0.04));color:var(--accent);font-weight:700;border:1px solid rgba(52,211,153,0.08)}
+    .btn.action{color:var(--muted)}
+    .btn.equals{background:linear-gradient(180deg,var(--accent),#10b981);color:#04251a;font-weight:800;grid-column:4;border:none}
+    .btn.wide{grid-column:1 / span 2;text-align:left;padding-left:20px}
+    .footer{font-size:0.82rem;color:var(--muted);text-align:center;padding-top:6px}
+    @media (max-width:420px){
+      .calculator{width:340px;padding:14px}
+      .value{font-size:1.6rem}
+      .btn{padding:12px;font-size:1rem}
+    }
+  </style>
+  <!-- React + ReactDOM + Babel from CDN for quick demo -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone@7.21.8/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    function isOperator(ch){
+      return ['+','-','*','/'].includes(ch);
+    }
+
+    // Minimal safe evaluator (restrict characters)
+    function safeEval(expr){
+      expr = expr.replace(/\u00D7/g,'*').replace(/\u00F7/g,'/');
+      if (!/^[0-9+\-*/().\s]+$/.test(expr)) throw new Error('Invalid characters');
+      if (/[+\/*]{2,}/.test(expr)) throw new Error('Invalid sequence');
+      const fn = new Function('return (' + expr + ')');
+      const result = fn();
+      if (!isFinite(result)) throw new Error('Math error');
+      return Math.round(result * 1e12) / 1e12;
+    }
+
+    function Key({ children, className='', onClick, ariaLabel }){
+      return (
+        <button
+          className={'btn ' + className}
+          onClick={onClick}
+          aria-label={ariaLabel || String(children)}
+          type="button"
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Calculator(){
+      const [expression, setExpression] = useState(''); // left-hand expression (may end with operator)
+      const [current, setCurrent] = useState(''); // current entry / result
+      const displayRef = useRef(null);
+
+      useEffect(()=> {
+        const handler = (e) => {
+          const k = e.key;
+          if (k >= '0' && k <= '9'){ pushValue(k); return; }
+          if (['+','-','*','/'].includes(k)){ pushOperator(k); return; }
+          if (k === '.') { pushValue('.'); return; }
+          if (k === 'Enter' || k === '='){ e.preventDefault(); computeResult(); return; }
+          if (k === 'Backspace'){ deleteLast(); return; }
+          if (k === 'Escape'){ clearAll(); return; }
+        };
+        window.addEventListener('keydown', handler);
+        return ()=> window.removeEventListener('keydown', handler);
+      }, [expression, current]);
+
+      function updateBoth(newExpr, newCur){
+        setExpression(newExpr);
+        setCurrent(newCur);
+      }
+
+      function pushValue(val){
+        // if last operation produced result and user starts typing number, start fresh
+        if (expression && !/[+\-*/]$/.test(expression) && current === expression.replace(/\s*=\s*$/,'')) {
+          updateBoth('', '');
+        }
+        if (current === '0' && val === '0') return;
+        if (current === '0' && val !== '.') setCurrent(val);
+        else if (val === '.' && current.includes('.')) return;
+        else setCurrent(prev => prev + val);
+      }
+
+      function pushOperator(op){
+        if (!current && !expression){
+          if (op === '-') { setCurrent('-'); return; }
+          return;
+        }
+        let expr = expression;
+        if (current) {
+          expr = expr + current;
+          setCurrent('');
+        }
+        if (isOperator(expr.slice(-1))){
+          expr = expr.slice(0,-1) + op;
+        } else {
+          expr = expr + op;
+        }
+        setExpression(expr);
+      }
+
+      function clearAll(){
+        updateBoth('','');
+      }
+
+      function deleteLast(){
+        if (current) setCurrent(prev => prev.slice(0,-1));
+        else if (expression) setExpression(prev => prev.slice(0,-1));
+      }
+
+      function applyPercent(){
+        try{
+          if (current){
+            const v = safeEval(current);
+            setCurrent(String(v / 100));
+          } else if (expression){
+            const v = safeEval(expression);
+            setCurrent(String(v / 100));
+            setExpression('');
+          }
+        } catch {
+          showError();
+        }
+      }
+
+      function computeResult(){
+        try{
+          const exp = expression + (current || '');
+          if (!exp) return;
+          const val = safeEval(exp);
+          setExpression(exp + ' =');
+          setCurrent(String(val));
+        } catch {
+          showError();
+        }
+      }
+
+      function showError(){
+        if (displayRef.current) displayRef.current.textContent = 'Error';
+        setTimeout(()=> clearAll(), 800);
+      }
+
+      const keys = [
+        {label:'C', action: clearAll, class:'action'},
+        {label:'⌫', action: deleteLast, class:'action', aria:'Backspace'},
+        {label:'%', action: applyPercent, class:'action', aria:'Percent'},
+        {label:'÷', value:'/', class:'operator'},
+        {label:'7', value:'7'}, {label:'8', value:'8'}, {label:'9', value:'9'}, {label:'×', value:'*', class:'operator'},
+        {label:'4', value:'4'}, {label:'5', value:'5'}, {label:'6', value:'6'}, {label:'−', value:'-', class:'operator'},
+        {label:'1', value:'1'}, {label:'2', value:'2'}, {label:'3', value:'3'}, {label:'+', value:'+', class:'operator'},
+        {label:'0', value:'0', class:'wide'}, {label:'.', value:'.'}, {label:'=', action: computeResult, class:'equals', aria:'Equals'},
+      ];
+
+      return (
+        <main className="calculator" role="application" aria-label="React calculator">
+          <div className="header" aria-hidden="true">
+            <h2 className="title">Calculator</h2>
+            <div style={{color:'var(--muted)',fontSize:'0.88rem'}}>React • Responsive</div>
+          </div>
+
+          <section className="display" aria-live="polite">
+            <div className="expr" aria-hidden="true">{expression}</div>
+            <div className="value" ref={displayRef}>{current === '' ? '0' : current}</div>
+          </section>
+
+          <div className="keys" role="group" aria-label="Calculator keys">
+            {keys.map((k, idx) => {
+              const cls = (k.class ? k.class : '') + (k.class === 'wide' ? ' wide' : '');
+              if (k.action) {
+                return <Key key={idx} className={cls} onClick={k.action} ariaLabel={k.aria}>{k.label}</Key>;
+              }
+              return <Key key={idx} className={cls} onClick={()=> {
+                if (isOperator(k.value)) pushOperator(k.value);
+                else pushValue(k.value);
+              }}>{k.label}</Key>;
+            })}
+          </div>
+
+          <div className="footer" aria-hidden="true">Tip: use keyboard — numbers, + - * / Enter, Backspace, Esc</div>
+        </main>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<Calculator />);
+  </script>
+</body>
+</html>
